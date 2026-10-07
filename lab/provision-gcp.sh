@@ -36,19 +36,34 @@ echo "  vmx present, /dev/kvm ok: $(lscpu | grep -i 'model name' | head -1)"
 say "Installing host packages (Debian 12)"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  podman qemu-system-x86 qemu-utils debootstrap git golang-go \
+  podman qemu-system-x86 qemu-utils debootstrap git curl ca-certificates \
   openssh-client build-essential flex bison libelf-dev libssl-dev bc rsync
 sudo usermod -aG kvm "$USER" || true   # /dev/kvm access for this user
 
+# Debian 12 ships Go 1.19, but syzkaller's go.mod requires >= 1.26 and that
+# bootstrap is too old to auto-fetch a newer toolchain. Install Go 1.26 directly.
+GO_VER="${GO_VER:-1.26.0}"
+if ! /usr/local/go/bin/go version 2>/dev/null | grep -q "go$GO_VER"; then
+  say "Installing Go $GO_VER"
+  curl -sSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" \
+    | sudo tar -C /usr/local -xz
+fi
+export PATH="/usr/local/go/bin:$PATH"
+
 mkdir -p "$LAB" "$IMG_DIR"
 
-# ---- 2. syzkaller (host build; Go auto-toolchain) ------------------------
+# ---- 2. syzkaller (host build) -------------------------------------------
+# Building on the Debian 12 HOST is deliberate: syz-executor then links against
+# bookworm's glibc, matching the rootfs image's glibc exactly. (On a bleeding-edge
+# host this mismatches and the guest dies with "lost connection to test machine".)
+# git must be present so the executor's baked GIT_REVISION matches syz-manager's,
+# otherwise the manager aborts with "mismatching manager/executor git revisions".
 say "Fetching + building syzkaller"
 if [[ ! -d "$SYZ" ]]; then
   mkdir -p "$(dirname "$SYZ")"
   git clone --depth 1 https://github.com/google/syzkaller "$SYZ"
 fi
-( cd "$SYZ" && GOTOOLCHAIN=auto make -j"$(nproc)" TARGETOS=linux TARGETARCH=amd64 )
+( cd "$SYZ" && GOTOOLCHAIN=local make -j"$(nproc)" TARGETOS=linux TARGETARCH=amd64 )
 
 # ---- 3. rootfs image (Debian bookworm) + ssh key -------------------------
 if [[ "${SKIP_IMAGE:-0}" != 1 && ! -f "$IMG_DIR/bookworm.img" ]]; then
