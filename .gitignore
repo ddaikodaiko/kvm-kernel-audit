@@ -1,0 +1,18 @@
+# ── kvm-kernel-audit: never track massive virtualization binaries/build trees ──
+# Kernel source/build trees (e.g. linux-6.1.74/, linux-6.1.74-kasan/)
+linux-*/
+# Linked/standalone vmlinux images
+vmlinux
+# Disk images (rootfs, data disks)
+*.img
+# syzkaller working dirs (corpus/crashes/instance state)
+workdir-*/
+# UEFI/pflash blobs from VMs
+*.rom
+*.vars
+
+# ── Always keep the human-readable deliverables, even if a broad rule catches them ──
+!*.md
+!*.cfg
+!*.sh
+!*repro.c
