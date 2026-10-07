@@ -453,6 +453,17 @@ Static read of `arch/x86/kvm/vmx/vmenter.S` (`__vmx_vcpu_run`; exit edge at `vmx
     kvmCTF host = Cascade Lake (Xeon Gold 5222): **bundle-parity check** — if the kvmCTF patch
     was cut before ~6.1.81 the pre-fix window is present; after, it is closed. Info-leak
     (relative-read) class, not a logic bug.
+  - **Cascade Lake qualifier (Xeon Gold 5222) — narrows the impact:** this part enumerates
+    `MDS_NO` (in-silicon MDS fix), so the pre-6.1.81 VERW-placement window is **not** a live
+    pure-MDS leak on the kvmCTF host. The VERW placement stays relevant here only for
+    **TAA** (TSX Async Abort — only if TSX is enabled; otherwise TSX-off is the mitigation)
+    and **RFDS** (only if the stepping enumerates RFDS-affected; RFDS is primarily an
+    Atom-core issue, so likely N/A on this Xeon — confirm by enumeration). Net:
+    defense-in-depth / info-leak (relative-read) tier, **not** a confirmed guest→host MDS
+    leak on this silicon.
+  - **ACTION (bundle parity):** confirm whether the applied kvmCTF patch includes
+    `43fb862de8f6` (≥ ~6.1.81); record TSX-enabled state + RFDS enumeration for the
+    Xeon Gold 5222 to decide whether the VERW-placement window is reachable at all.
 
 **Net:** register hygiene (V3a) and the in-asm spec-ctrl/RSB edge (V3b) are sound on v6.1.74.
 The one substantive delta vs. later 6.1.y is the VERW-placement hardening (V3d) — verify
