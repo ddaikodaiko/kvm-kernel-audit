@@ -127,3 +127,40 @@ Fixes confirmed **absent** from v6.1.74 (no `->role.word == role.word` nor
 Everything here is public and patched; no embargo, no exploit, no weaponization. A *new*
 bug confirmed later must still follow `security-research/kvmctf/rules.md` (report to
 `security@kernel.org`, coordinate with Google, 90-day cap).
+
+---
+
+## Addendum (2026-10-08) — the MMIO-SPTE ordering precursor is also absent
+
+The pwn.ai kvmCTF escape names `mmu_set_spte()` as the trigger: it installs the MMIO
+SPTE *before* dropping the existing present SPTE, so the old rmap entry is orphaned.
+Confirmed by direct source read on v6.1.74 — **`arch/x86/kvm/mmu/mmu.c:2817-2822`**:
+
+```c
+if (unlikely(is_noslot_pfn(pfn))) {
+    vcpu->stat.pf_mmio_spte_created++;
+    mark_mmio_spte(vcpu, sptep, gfn, pte_access);   // overwrites a present SPTE...
+    return RET_PF_EMULATE;                            // ...and returns BEFORE the drop
+}
+if (is_shadow_present_pte(*sptep)) {                 // never reached for a noslot pfn
+    ...
+    drop_spte(vcpu->kvm, sptep);                      // the rmap_remove that is skipped
+```
+
+The upstream fix `aad885e77496` ("Drop/zap existing present SPTE even when creating an
+MMIO SPTE", 2026-03-05) moves the `is_noslot_pfn` block to *after* the present-SPTE
+handling. So a RAM→MMIO flip over a present leaf leaves the leaf's rmap entry behind —
+the precondition the gfn/role UAFs then weaponise.
+
+### The whole "drop present SPTE" hardening family vs v6.1.74 (all ABSENT)
+
+| Commit | Subject | On v6.1.74 |
+|---|---|---|
+| `aad885e77496` | Drop/zap existing present SPTE even when creating an MMIO SPTE | **ABSENT** (mmu.c:2817 has the pre-fix ordering) |
+| `0cb2af2ea66a` | Fix shadow paging UAF due to unexpected **GFN** (CVE-2026-46113) | **ABSENT** (mmu.c:2256) |
+| `81ccda30b4e8` | Fix shadow paging UAF due to unexpected **role** (CVE-2026-53359) | **ABSENT** (mmu.c:2256) |
+
+(Ancestry via `git merge-base --is-ancestor` against the pinned tag, corroborated by
+reading the actual source at each site — these mid-2026 mainline fixes are not backported
+into the Jan-2024 v6.1.74 tag.) Net: stock v6.1.74 carries the **complete** unpatched
+present-SPTE/rmap-mismatch surface, consistent with it being live on the kvmCTF host.
